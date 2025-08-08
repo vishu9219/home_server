@@ -1,42 +1,62 @@
-#!/bin/bash
-# /usr/local/bin/mount-external-ssd.sh
-# Usage: mount-external-ssd.sh mount
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-MOUNT_BASE="/mnt/external"
-LOG_FILE="/var/log/external-mount.log"
+# Non-interactive script to automatically mount all unmounted /dev/sd* devices
+# at consecutive /mnt/extN directories and ensure persistent fstab entries.
 
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
+FSTAB="/etc/fstab"
+FSTAB_BAK="${FSTAB}.bak"
 
-if [[ "$1" != "mount" ]]; then
-  echo "Usage: $0 mount"
-  exit 1
+# Backup fstab once
+if [[ ! -f "${FSTAB_BAK}" ]]; then
+  sudo cp "${FSTAB}" "${FSTAB_BAK}"
 fi
 
-sudo mkdir -p "$MOUNT_BASE"
+# Function to get next available mountpoint index
+next_index() {
+  local base="/mnt/ext"
+  local i=1
+  while [[ -e "${base}${i}" ]]; do
+    ((i++))
+  done
+  echo "${i}"
+}
 
-# Detect and mount each partition
-lsblk -nr -o NAME,TYPE,MOUNTPOINT | awk '$2=="part" && $3=="" {print $1}' | while read dev; do
-  mount_point="$MOUNT_BASE/$(blkid -s LABEL -o value /dev/$dev || echo "ssd-$dev")"
-  sudo mkdir -p "$mount_point"
-  if ! mount | grep -q "$mount_point"; then
-    fstype=$(blkid -s TYPE -o value /dev/$dev)
-    case "$fstype" in
-      ext4|ext3|ext2)
-        sudo mount -o defaults,discard,ssd /dev/"$dev" "$mount_point";;
-      ntfs)
-        sudo mount -t ntfs-3g -o defaults,uid=1000,gid=1000 /dev/"$dev" "$mount_point";;
-      exfat|vfat)
-        sudo mount -t exfat -o defaults,uid=1000,gid=1000 /dev/"$dev" "$mount_point";;
-      *)
-        log "Unsupported FS: $fstype on /dev/$dev"
-        continue;;
-    esac
-    log "Mounted /dev/$dev at $mount_point"
-  else
-    log "/dev/$dev already mounted"
+# Iterate through all /dev/sd* block devices and partitions
+for dev in /dev/sd*; do
+  [[ -b "${dev}" ]] || continue
+  # Skip if already mounted
+  if mount | grep -q "^${dev} "; then
+    continue
   fi
+
+  # Get UUID (if any)
+  uuid=$(blkid -s UUID -o value "${dev}" 2>/dev/null || true)
+
+  # If fstab already has entry, mount via fstab path
+  if [[ -n "${uuid}" ]] && grep -qF "${uuid}" "${FSTAB}"; then
+    mp=$(grep -F "${uuid}" "${FSTAB}" | awk '{print $2}')
+    sudo mount "${mp}"
+    continue
+  fi
+
+  # Create filesystem if none
+  if [[ -z "${uuid}" ]]; then
+    sudo mkfs.ext4 -F "${dev}"
+    uuid=$(blkid -s UUID -o value "${dev}")
+  fi
+
+  # Create mountpoint
+  idx=$(next_index)
+  mp="/mnt/ext${idx}"
+  sudo mkdir -p "${mp}"
+
+  # Add fstab entry
+  echo "UUID=${uuid}    ${mp}    ext4    defaults,noatime    0    2" | sudo tee -a "${FSTAB}" >/dev/null
+
+  # Mount it
+  sudo mount "${mp}"
 done
+
+echo "Done: all unmounted /dev/sd* devices have been mounted and fstab updated."
