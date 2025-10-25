@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  twingate-festive-eagle:
+    image: twingate/connector:1
+    container_name: twingate-festive-eagle
+    restart: unless-stopped
+    network_mode: "host"       # same as --network=host
+    pull_policy: always        # same as --pull=always (requires recent Docker Compose)
+    environment:
+      TWINGATE_NETWORK: "vishalsri92"
+      TWINGATE_ACCESS_TOKEN: "${TWINGATE_ACCESS_TOKEN}"
+      TWINGATE_REFRESH_TOKEN: "${TWINGATE_REFRESH_TOKEN}"
+      TWINGATE_LABEL_HOSTNAME: "${HOSTNAME:-twingate-festive-eagle}"
+      TWINGATE_LOG_ANALYTICS: "v2"
+      TWINGATE_LABEL_DEPLOYED_BY: "docker"
