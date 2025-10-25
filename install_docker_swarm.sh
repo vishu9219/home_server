@@ -35,5 +35,25 @@ sudo usermod -aG docker vishal
 # Init docker swarn
 docker swarm init --advertise-addr <MANAGER_IP>
 
+# Stop the Docker service
+systemctl stop docker
+
+# Edit or create the daemon.json file
+cat <<EOF > /etc/docker/daemon.json
+{
+  "data-root": "/mnt/external/docker"
+}
+EOF
+
+# Copy existing Docker data
+rsync -aP /var/lib/docker/ /mnt/external/docker
+
+# Restart Docker
+sudo systemctl daemon-reload
+sudo systemctl start docker
+
+# Cleanup
+rm -rf /var/lib/docker
+
 # Command to run at child cluster
 docker swarm join --token <SWARM_TOKEN> <MANAGER_IP>:2377
